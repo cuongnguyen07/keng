@@ -15,7 +15,7 @@ const AIEngine = (() => {
     Storage.saveSetting('openai_key', key);
   }
 
-  const DEFAULT_GEMINI_KEY = 'AQ.Ab8RN6LnLtja4OBv6Dx8jAckt7XB45VDGs5kmELvVfYdxYcBKQ';
+  const DEFAULT_GEMINI_KEY = 'AQ.Ab8RN6L1s_3LMExd-E_tAFT2HSaUyXNhaUa3KjK1kdpjLEvOTw';
 
   function configureGemini(key) {
     geminiKey = key || DEFAULT_GEMINI_KEY;

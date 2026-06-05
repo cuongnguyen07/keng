@@ -367,7 +367,7 @@ async function transcribeAudioFile(audioBlob, fileName) {
   const mimeType = mimeMap[ext] || audioBlob.type || 'audio/webm';
   const namedBlob = new Blob([audioBlob], { type: mimeType });
 
-  const geminiKey = Storage.getSetting('gemini_key') || 'AQ.Ab8RN6LnLtja4OBv6Dx8jAckt7XB45VDGs5kmELvVfYdxYcBKQ';
+  const geminiKey = Storage.getSetting('gemini_key') || 'AQ.Ab8RN6L1s_3LMExd-E_tAFT2HSaUyXNhaUa3KjK1kdpjLEvOTw';
   const openaiKey = Storage.getSetting('openai_key');
 
   // Case A: Sử dụng API Key trực tiếp từ trình duyệt nếu có (Bypass giới hạn dung lượng & thời gian của Vercel cho file dài)
