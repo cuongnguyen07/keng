@@ -33,6 +33,23 @@ function renderRecordPage() {
         </div>
       </div>
 
+      <!-- DRAG & DROP UPLOAD ZONE -->
+      <div class="upload-zone" id="upload-zone"
+        ondragover="handleDragOver(event)"
+        ondragleave="handleDragLeave(event)"
+        ondrop="handleFileDrop(event)"
+        onclick="document.getElementById('audio-file-input').click()"
+      >
+        <input type="file" id="audio-file-input" accept="audio/*,video/*" style="display:none" onchange="handleFileSelect(event)" />
+        <div class="upload-zone-icon" id="upload-zone-icon">📂</div>
+        <div class="upload-zone-title" id="upload-zone-title">Kéo thả file âm thanh vào đây</div>
+        <div class="upload-zone-hint">Hoặc bấm vào để chọn file &nbsp;•&nbsp; Hỗ trợ: MP3, WAV, M4A, OGG, WEBM, MP4</div>
+        <div class="upload-progress-wrap" id="upload-progress-wrap" style="display:none;">
+          <div class="upload-progress-bar"><div class="upload-progress-fill" id="upload-progress-fill"></div></div>
+          <div class="upload-progress-label" id="upload-progress-label">Đang xử lý...</div>
+        </div>
+      </div>
+
       <!-- MAIN WORKSPACE (2 columns) -->
       <div class="record-workspace">
 
@@ -244,12 +261,230 @@ function renderRecordPage() {
   initRecordPage();
 }
 
+/* ---- Drag & Drop File Upload Handlers ---- */
+function handleDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const zone = document.getElementById('upload-zone');
+  if (zone) zone.classList.add('drag-over');
+}
+
+function handleDragLeave(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const zone = document.getElementById('upload-zone');
+  if (zone) zone.classList.remove('drag-over');
+}
+
+function handleFileDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const zone = document.getElementById('upload-zone');
+  if (zone) zone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('audio/') && !file.type.startsWith('video/')) {
+    showToast('⚠️ Vui lòng chọn file âm thanh (MP3, WAV, M4A, OGG, WEBM, MP4)', 'error');
+    return;
+  }
+  processUploadedAudio(file);
+}
+
+function handleFileSelect(e) {
+  const file = e.target.files[0];
+  if (file) processUploadedAudio(file);
+}
+
+async function processUploadedAudio(file) {
+  const zone = document.getElementById('upload-zone');
+  const icon = document.getElementById('upload-zone-icon');
+  const title = document.getElementById('upload-zone-title');
+  const progressWrap = document.getElementById('upload-progress-wrap');
+  const progressFill = document.getElementById('upload-progress-fill');
+  const progressLabel = document.getElementById('upload-progress-label');
+
+  // Show progress
+  if (icon) icon.textContent = '⏳';
+  if (title) title.textContent = `Đang xử lý: ${file.name}`;
+  if (progressWrap) progressWrap.style.display = 'block';
+  showToast(`📂 Đã tải file: ${file.name}`, 'info');
+
+  // Animate progress to 40%
+  let progress = 0;
+  const progressInterval = setInterval(() => {
+    progress = Math.min(progress + 5, 40);
+    if (progressFill) progressFill.style.width = progress + '%';
+  }, 100);
+
+  try {
+    let transcriptText = '';
+    const useProxy = window.location.protocol !== 'file:';
+
+    if (useProxy || AIEngine.isUsingGemini()) {
+      // Use Whisper via server proxy or direct API
+      if (progressLabel) progressLabel.textContent = 'Giao cho AI nhận diện giọng nói...';
+      clearInterval(progressInterval);
+      if (progressFill) progressFill.style.width = '60%';
+
+      const audioBlob = new Blob([await file.arrayBuffer()], { type: file.type });
+      transcriptText = await transcribeAudioFile(audioBlob, file.name);
+
+      if (progressFill) progressFill.style.width = '85%';
+    } else {
+      // Fallback: use Web Speech API on a local audio element
+      clearInterval(progressInterval);
+      if (progressFill) progressFill.style.width = '80%';
+      if (progressLabel) progressLabel.textContent = 'Không có AI, đối chiếu thủ công...';
+      transcriptText = '(File âm thanh đã tải lên. Cài API key Gemini để nhận diện nội dung tự động)';
+    }
+
+    if (progressFill) progressFill.style.width = '100%';
+    if (progressLabel) progressLabel.textContent = 'Hoàn tất!';
+
+    // Load the transcript into record state and save
+    await loadUploadedTranscript(transcriptText, file.name, file);
+
+    // Reset upload zone after a moment
+    setTimeout(() => {
+      if (icon) icon.textContent = '✅';
+      if (title) title.textContent = 'File đã xử lý thành công! Xem kết quả bên dưới';
+      if (progressWrap) progressWrap.style.display = 'none';
+    }, 1500);
+
+  } catch (err) {
+    clearInterval(progressInterval);
+    console.error('processUploadedAudio error:', err);
+    showToast('⚠️ Không thể xử lý file: ' + err.message, 'error');
+    if (icon) icon.textContent = '❌';
+    if (title) title.textContent = 'Xử lý thất bại. Thử lại!';
+    if (progressWrap) progressWrap.style.display = 'none';
+  }
+}
+
+async function transcribeAudioFile(audioBlob, fileName) {
+  const ext = fileName.split('.').pop().toLowerCase();
+  const mimeMap = { mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', ogg: 'audio/ogg', webm: 'audio/webm', mp4: 'audio/mp4' };
+  const mimeType = mimeMap[ext] || audioBlob.type || 'audio/webm';
+  const namedBlob = new Blob([audioBlob], { type: mimeType });
+
+  // Try proxy endpoint first (Vercel serverless)
+  if (window.location.protocol !== 'file:') {
+    const formData = new FormData();
+    formData.append('file', namedBlob, fileName);
+    formData.append('language', recordState.language === 'en-US' ? 'en' : 'vi');
+    const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
+    if (res.ok) {
+      const data = await res.json();
+      return data.text || '';
+    }
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData.error || `Server error ${res.status}`);
+  }
+
+  // Fallback for file:// (direct OpenAI call if key available)
+  const openaiKey = Storage.getSetting('openai_key');
+  if (openaiKey) {
+    const formData = new FormData();
+    formData.append('file', namedBlob, fileName);
+    formData.append('model', 'whisper-1');
+    formData.append('language', recordState.language === 'en-US' ? 'en' : 'vi');
+    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${openaiKey}` },
+      body: formData,
+    });
+    if (!res.ok) throw new Error(`Whisper API error: ${res.status}`);
+    const data = await res.json();
+    return data.text || '';
+  }
+
+  throw new Error('Không có API key hoặc kết nối đến server để nhận diện. Vui lòng triển khai lên Vercel và cấu hình GEMINI_API_KEY.');
+}
+
+async function loadUploadedTranscript(transcriptText, fileName, file) {
+  // Reset record state
+  recordState.transcript = transcriptText
+    ? transcriptText.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0).map(s => ({
+        text: s.trim(), speaker: 1,
+        timestamp: '00:00', isBookmark: false
+      }))
+    : [{ text: transcriptText || '(Không có nội dung)', speaker: 1, timestamp: '00:00', isBookmark: false }];
+
+  recordState.lastDuration = '00:00';
+  recordState.autoSaved = false;
+  recordState.currentNoteId = null;
+  window._recordStartTime = Date.now();
+
+  // Render transcript
+  const container = document.getElementById('transcript-segments');
+  const placeholder = document.getElementById('transcript-placeholder');
+  if (placeholder) placeholder.style.display = 'none';
+  if (container) {
+    container.innerHTML = '';
+    recordState.transcript.forEach((seg, idx) => {
+      const el = document.createElement('div');
+      el.className = 'transcript-segment';
+      el.dataset.idx = idx;
+      el.innerHTML = `<span>${escapeHtml(seg.text)}</span>`;
+      el.onclick = () => toggleSegmentBookmark(el, idx);
+      container.appendChild(el);
+    });
+    container.scrollTop = container.scrollHeight;
+  }
+
+  // Update status bar
+  const statusText = document.getElementById('status-text');
+  if (statusText) statusText.textContent = `✅ File đã tải: ${fileName}`;
+
+  // Auto-save and process
+  autoSaveNote();
+  showSaveBar();
+  if (recordState.transcript.length > 0) {
+    showToast('🤖 Đang phân tích AI...', 'info');
+    startAIProcessing();
+  }
+}
+
 /* ---- Record Page Styles ---- */
 function injectRecordStyles() {
   if (document.getElementById('record-page-styles')) return;
   const style = document.createElement('style');
   style.id = 'record-page-styles';
   style.textContent = `
+    /* ---- Upload Drop Zone ---- */
+    .upload-zone {
+      margin: 0 32px 16px;
+      border: 2px dashed var(--border-soft);
+      border-radius: var(--radius-xl);
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      background: rgba(124,58,237,0.03);
+      transition: all 0.25s ease;
+      text-align: center;
+    }
+    @media (max-width: 768px) { .upload-zone { margin: 0 16px 12px; padding: 16px; } }
+    .upload-zone:hover, .upload-zone.drag-over {
+      border-color: var(--accent-violet);
+      background: rgba(124,58,237,0.08);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 24px rgba(124,58,237,0.12);
+    }
+    .upload-zone.drag-over {
+      border-style: solid;
+      background: rgba(124,58,237,0.14);
+    }
+    .upload-zone-icon { font-size: 1.8rem; line-height: 1; }
+    .upload-zone-title { font-size: 0.88rem; font-weight: 600; color: var(--text-primary); }
+    .upload-zone-hint { font-size: 0.73rem; color: var(--text-muted); }
+    .upload-progress-wrap { width: 100%; max-width: 380px; margin-top: 8px; display: flex; flex-direction: column; gap: 6px; align-items: center; }
+    .upload-progress-bar { width: 100%; height: 6px; background: var(--bg-elevated); border-radius: var(--radius-full); overflow: hidden; }
+    .upload-progress-fill { height: 100%; width: 0%; background: var(--grad-primary); border-radius: var(--radius-full); transition: width 0.3s ease; }
+    .upload-progress-label { font-size: 0.72rem; color: var(--text-muted); }
+
     .record-page { min-height: 100vh; }
     .record-workspace {
       display: grid;

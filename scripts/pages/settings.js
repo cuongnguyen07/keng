@@ -3,7 +3,6 @@
    ========================================== */
 
 function renderSettingsPage() {
-  const apiKey = Storage.getSetting('openai_key', '');
   const lang = Storage.getSetting('language', 'vi');
   const autoSave = Storage.getSetting('auto_save', true);
   const meetingDefault = Storage.getSetting('meeting_default', false);
@@ -100,32 +99,6 @@ function renderSettingsPage() {
   `;
 
   injectSettingsStyles();
-}
-
-function saveApiKey() {
-  const key = document.getElementById('api-key-input')?.value.trim();
-  AIEngine.configure(key || null);
-  const result = document.getElementById('api-test-result');
-  if (key) {
-    if (result) result.innerHTML = `<span style="color:var(--accent-green)">✓ API key đã lưu. AI sẽ sử dụng GPT-4o & Whisper.</span>`;
-    showToast('✅ API key đã lưu thành công!', 'success');
-  } else {
-    if (result) result.innerHTML = `<span style="color:var(--accent-amber)">⚠ Không có API key. Đang dùng chế độ Mock AI.</span>`;
-    showToast('⚠️ Sẽ sử dụng Mock AI (không cần API key)', 'info');
-  }
-}
-
-function clearApiKey() {
-  AIEngine.configure(null);
-  const input = document.getElementById('api-key-input');
-  if (input) input.value = '';
-  showToast('🗑️ Đã xóa API key', 'info');
-  renderSettingsPage();
-}
-
-function toggleApiKeyVisibility() {
-  const input = document.getElementById('api-key-input');
-  if (input) input.type = input.type === 'password' ? 'text' : 'password';
 }
 
 function saveSetting(key, value) {

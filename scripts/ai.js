@@ -5,6 +5,9 @@
 const AIEngine = (() => {
   let apiKey = null;
   let useOpenAI = false;
+  let geminiKey = null;
+  let useGemini = false;
+  let useProxy = false;
 
   function configure(key) {
     apiKey = key;
@@ -12,13 +15,33 @@ const AIEngine = (() => {
     Storage.saveSetting('openai_key', key);
   }
 
+  function configureGemini(key) {
+    geminiKey = key;
+    useGemini = !!key;
+    Storage.saveSetting('gemini_key', key);
+    useProxy = !key && window.location.protocol !== 'file:';
+  }
+
   function loadConfig() {
     apiKey = Storage.getSetting('openai_key');
     useOpenAI = !!apiKey;
+    geminiKey = Storage.getSetting('gemini_key');
+    useGemini = !!geminiKey;
+    useProxy = !geminiKey && window.location.protocol !== 'file:';
   }
 
   // ---- SUMMARIZE ----
   async function summarize(transcript, language = 'vi') {
+    if (useGemini || useProxy) {
+      const langStr = language === 'vi' ? 'Tiếng Việt' : 'English';
+      const systemInstruction = `Bạn là trợ lý học tập thông minh. Hãy tóm tắt nội dung bài giảng một cách súc tích, dễ hiểu bằng ${langStr}. Giữ nguyên thuật ngữ chuyên môn. Tóm tắt tối đa 150 từ.`;
+      const userMessage = `Tóm tắt nội dung sau:\n\n${transcript}`;
+      try {
+        return await callGemini(systemInstruction, userMessage);
+      } catch(e) {
+        console.error('Gemini summarize error, falling back to mock:', e);
+      }
+    }
     if (useOpenAI && apiKey) {
       return await callOpenAI(buildSummarizePrompt(transcript, language));
     }
@@ -41,6 +64,16 @@ const AIEngine = (() => {
 
   // ---- KEY POINTS ----
   async function extractKeyPoints(transcript, language = 'vi') {
+    if (useGemini || useProxy) {
+      const langStr = language === 'vi' ? 'Tiếng Việt' : 'English';
+      const systemInstruction = `Bạn là chuyên gia phân tích nội dung học thuật. Hãy trích xuất 3-5 ý chính quan trọng nhất từ bài giảng bằng ${langStr}. Trả về theo định dạng:\n1. [Ý chính 1]\n2. [Ý chính 2]\n...`;
+      try {
+        const raw = await callGemini(systemInstruction, transcript);
+        return parseKeyPoints(raw);
+      } catch(e) {
+        console.error('Gemini extractKeyPoints error, falling back to mock:', e);
+      }
+    }
     if (useOpenAI && apiKey) {
       const raw = await callOpenAI(buildKeyPointsPrompt(transcript, language));
       return parseKeyPoints(raw);
@@ -72,6 +105,16 @@ const AIEngine = (() => {
 
   // ---- FLASHCARDS ----
   async function generateFlashcards(transcript, language = 'vi', count = 5) {
+    if (useGemini || useProxy) {
+      const langStr = language === 'vi' ? 'Tiếng Việt' : 'English';
+      const systemInstruction = `Bạn tạo flashcard ôn tập từ nội dung bài giảng bằng ${langStr}. Tạo ${count} cặp Q&A. Định dạng:\nQ: [Câu hỏi]\nA: [Trả lời ngắn gọn]\n---`;
+      try {
+        const raw = await callGemini(systemInstruction, transcript);
+        return parseFlashcards(raw);
+      } catch(e) {
+        console.error('Gemini generateFlashcards error, falling back to mock:', e);
+      }
+    }
     if (useOpenAI && apiKey) {
       const raw = await callOpenAI(buildFlashcardPrompt(transcript, language, count));
       return parseFlashcards(raw);
@@ -120,6 +163,13 @@ const AIEngine = (() => {
 
   // ---- CHATBOT ----
   async function chat(userMessage, transcript, history = [], language = 'vi') {
+    if (useGemini || useProxy) {
+      try {
+        return await callGeminiChat(userMessage, transcript, history, language);
+      } catch(e) {
+        console.error('Gemini chat error, falling back to mock:', e);
+      }
+    }
     if (useOpenAI && apiKey) {
       return await callOpenAIChatStream(userMessage, transcript, history, language);
     }
@@ -178,6 +228,86 @@ const AIEngine = (() => {
     }
   }
 
+  // ---- GEMINI API CALLS ----
+  async function callGemini(systemInstruction, userMessage) {
+    if (useProxy) {
+      const res = await fetch('/api/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ systemInstruction, userMessage })
+      });
+      if (!res.ok) throw new Error(`Proxy Gemini error: ${res.status}`);
+      const data = await res.json();
+      return data.text;
+    } else {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+      const body = {
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: userMessage }]
+          }
+        ]
+      };
+      if (systemInstruction) {
+        body.systemInstruction = {
+          parts: [{ text: systemInstruction }]
+        };
+      }
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error(`Gemini API error: ${res.status}`);
+      const data = await res.json();
+      return data.candidates[0].content.parts[0].text;
+    }
+  }
+
+  async function callGeminiChat(userMessage, transcript, history, lang) {
+    const langStr = lang === 'vi' ? 'Tiếng Việt' : 'English';
+    const systemInstruction = `Bạn là trợ lý học tập thông minh. Trả lời câu hỏi của học sinh DỰA TRÊN nội dung bài giảng sau bằng ${langStr}. Nếu câu hỏi không liên quan đến bài giảng, hãy trả lời dựa trên kiến thức chung nhưng ưu tiên nội dung bài giảng.\n\nBÀI GIẢNG:\n${transcript.substring(0, 3000)}`;
+    
+    const contents = [];
+    history.slice(-6).forEach(h => {
+      contents.push({
+        role: h.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: h.content }]
+      });
+    });
+    contents.push({
+      role: 'user',
+      parts: [{ text: userMessage }]
+    });
+
+    if (useProxy) {
+      const res = await fetch('/api/gemini', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ systemInstruction, contents })
+      });
+      if (!res.ok) throw new Error(`Proxy Gemini Chat error: ${res.status}`);
+      const data = await res.json();
+      return data.text;
+    } else {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents,
+          systemInstruction: {
+            parts: [{ text: systemInstruction }]
+          }
+        })
+      });
+      if (!res.ok) throw new Error(`Gemini Chat error: ${res.status}`);
+      const data = await res.json();
+      return data.candidates[0].content.parts[0].text;
+    }
+  }
+
   // ---- OPENAI API CALL ----
   async function callOpenAI(messages) {
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -221,5 +351,16 @@ const AIEngine = (() => {
   }
 
   loadConfig();
-  return { configure, summarize, extractKeyPoints, generateFlashcards, chat, transcribeAudio, processTranscript, isUsingOpenAI: () => useOpenAI };
+  return { 
+    configure, 
+    configureGemini,
+    summarize, 
+    extractKeyPoints, 
+    generateFlashcards, 
+    chat, 
+    transcribeAudio, 
+    processTranscript, 
+    isUsingOpenAI: () => useOpenAI,
+    isUsingGemini: () => (useGemini || useProxy)
+  };
 })();
