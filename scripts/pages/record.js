@@ -367,18 +367,40 @@ async function transcribeAudioFile(audioBlob, fileName) {
   const mimeType = mimeMap[ext] || audioBlob.type || 'audio/webm';
   const namedBlob = new Blob([audioBlob], { type: mimeType });
 
-  // Try proxy endpoint first (Vercel serverless)
+  // Try proxy endpoint first (Vercel Edge Function)
   if (window.location.protocol !== 'file:') {
     const formData = new FormData();
     formData.append('file', namedBlob, fileName);
     formData.append('language', recordState.language === 'en-US' ? 'en' : 'vi');
-    const res = await fetch('/api/transcribe', { method: 'POST', body: formData });
+    
+    let res;
+    try {
+      res = await fetch('/api/transcribe', { method: 'POST', body: formData });
+    } catch (fetchErr) {
+      throw new Error(`Kết nối thất bại: ${fetchErr.message}. Vui lòng kiểm tra mạng.`);
+    }
+
     if (res.ok) {
       const data = await res.json();
       return data.text || '';
     }
-    const errData = await res.json().catch(() => ({}));
-    throw new Error(errData.error || `Server error ${res.status}`);
+
+    // Handle error response (either JSON or plain text)
+    let errorMsg = `Server error ${res.status}`;
+    try {
+      const errData = await res.json();
+      if (errData && errData.error) errorMsg = errData.error;
+    } catch (e) {
+      try {
+        const text = await res.text();
+        if (text && text.length < 150) {
+          errorMsg = text;
+        } else if (res.status === 504) {
+          errorMsg = 'Yêu cầu bị quá tải thời gian (Gateway Timeout). File của bạn có thể quá dài hoặc OpenAI phản hồi quá chậm.';
+        }
+      } catch (ex) {}
+    }
+    throw new Error(errorMsg);
   }
 
   // Fallback for file:// (direct OpenAI call if key available)
