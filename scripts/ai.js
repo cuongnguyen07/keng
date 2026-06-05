@@ -15,17 +15,19 @@ const AIEngine = (() => {
     Storage.saveSetting('openai_key', key);
   }
 
+  const DEFAULT_GEMINI_KEY = 'AQ.Ab8RN6LnLtja4OBv6Dx8jAckt7XB45VDGs5kmELvVfYdxYcBKQ';
+
   function configureGemini(key) {
-    geminiKey = key;
-    useGemini = !!key;
+    geminiKey = key || DEFAULT_GEMINI_KEY;
+    useGemini = !!geminiKey;
     Storage.saveSetting('gemini_key', key);
-    useProxy = !key && window.location.protocol !== 'file:';
+    useProxy = !geminiKey && window.location.protocol !== 'file:';
   }
 
   function loadConfig() {
     apiKey = Storage.getSetting('openai_key');
     useOpenAI = !!apiKey;
-    geminiKey = Storage.getSetting('gemini_key');
+    geminiKey = Storage.getSetting('gemini_key') || DEFAULT_GEMINI_KEY;
     useGemini = !!geminiKey;
     useProxy = !geminiKey && window.location.protocol !== 'file:';
   }

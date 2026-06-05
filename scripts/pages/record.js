@@ -367,7 +367,73 @@ async function transcribeAudioFile(audioBlob, fileName) {
   const mimeType = mimeMap[ext] || audioBlob.type || 'audio/webm';
   const namedBlob = new Blob([audioBlob], { type: mimeType });
 
-  // Try proxy endpoint first (Vercel Edge Function)
+  const geminiKey = Storage.getSetting('gemini_key') || 'AQ.Ab8RN6LnLtja4OBv6Dx8jAckt7XB45VDGs5kmELvVfYdxYcBKQ';
+  const openaiKey = Storage.getSetting('openai_key');
+
+  // Case A: Sử dụng API Key trực tiếp từ trình duyệt nếu có (Bypass giới hạn dung lượng & thời gian của Vercel cho file dài)
+  if (geminiKey) {
+    const base64Data = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = (e) => reject(new Error('Không thể đọc file âm thanh: ' + e.target.error));
+      reader.readAsDataURL(namedBlob);
+    });
+
+    const model = 'gemini-2.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+    
+    // Chuẩn hóa MimeType cho Gemini
+    let gMimeType = mimeType;
+    if (gMimeType === 'audio/x-m4a' || gMimeType === 'audio/m4a') gMimeType = 'audio/mp4';
+
+    const promptText = recordState.language === 'en-US'
+      ? "Transcribe the audio/video file exactly as spoken. Output ONLY the transcript text, without any introduction, headers, comments, or markdown formatting."
+      : "Hãy chuyển đổi chính xác lời nói trong file âm thanh/video này thành văn bản tiếng Việt. CHỈ trả về đoạn văn bản hội thoại được dịch ra, không thêm lời chào, không thêm nhận xét, giải thích hay bất kỳ định dạng markdown nào.";
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { inlineData: { mimeType: gMimeType, data: base64Data } },
+            { text: promptText }
+          ]
+        }]
+      })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      let errMsg = errText;
+      try {
+        const errJson = JSON.parse(errText);
+        if (errJson.error && errJson.error.message) errMsg = errJson.error.message;
+      } catch (e) {}
+      throw new Error(`Gemini Transcribe error: ${errMsg}`);
+    }
+
+    const data = await res.json();
+    const transcript = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    return transcript.trim();
+  }
+
+  if (openaiKey) {
+    const formData = new FormData();
+    formData.append('file', namedBlob, fileName);
+    formData.append('model', 'whisper-1');
+    formData.append('language', recordState.language === 'en-US' ? 'en' : 'vi');
+    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${openaiKey}` },
+      body: formData,
+    });
+    if (!res.ok) throw new Error(`Whisper API error: ${res.status}`);
+    const data = await res.json();
+    return data.text || '';
+  }
+
+  // Case B: Sử dụng Vercel proxy (dành cho người dùng không có Key lưu ở trình duyệt)
   if (window.location.protocol !== 'file:') {
     const formData = new FormData();
     formData.append('file', namedBlob, fileName);
@@ -403,24 +469,7 @@ async function transcribeAudioFile(audioBlob, fileName) {
     throw new Error(errorMsg);
   }
 
-  // Fallback for file:// (direct OpenAI call if key available)
-  const openaiKey = Storage.getSetting('openai_key');
-  if (openaiKey) {
-    const formData = new FormData();
-    formData.append('file', namedBlob, fileName);
-    formData.append('model', 'whisper-1');
-    formData.append('language', recordState.language === 'en-US' ? 'en' : 'vi');
-    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${openaiKey}` },
-      body: formData,
-    });
-    if (!res.ok) throw new Error(`Whisper API error: ${res.status}`);
-    const data = await res.json();
-    return data.text || '';
-  }
-
-  throw new Error('Không có API key hoặc kết nối đến server để nhận diện. Vui lòng triển khai lên Vercel và cấu hình GEMINI_API_KEY.');
+  throw new Error('Không có API key hoặc kết nối đến server để nhận diện. Vui lòng thiết lập GEMINI_API_KEY ở trình duyệt hoặc Vercel.');
 }
 
 async function loadUploadedTranscript(transcriptText, fileName, file) {
