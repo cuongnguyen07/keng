@@ -1,5 +1,5 @@
 /* ==========================================
-   FLASHCARDS PAGE
+   FLASHCARDS PAGE – Grouped by Recording
    ========================================== */
 
 let currentFlashcardIdx = 0;
@@ -9,6 +9,21 @@ let studyCards = [];
 function renderFlashcardsPage() {
   const cards = Storage.getFlashcards();
   const noteTitles = [...new Set(cards.map(c => c.noteTitle).filter(Boolean))];
+
+  // Group flashcards by noteId (or noteTitle as fallback key)
+  const groups = {};
+  cards.forEach(card => {
+    const key = card.noteId || card.noteTitle || '__ungrouped__';
+    if (!groups[key]) {
+      groups[key] = {
+        noteId: card.noteId || '',
+        noteTitle: card.noteTitle || 'Không có tiêu đề',
+        cards: []
+      };
+    }
+    groups[key].cards.push(card);
+  });
+  const groupList = Object.values(groups);
 
   document.getElementById('flashcards-content').innerHTML = `
     <div class="flashcards-page">
@@ -81,28 +96,49 @@ function renderFlashcardsPage() {
             </div>
           </div>
 
-          <!-- CARDS GRID -->
+          <!-- RECORDING GROUPS LIST -->
           <div id="fc-grid-view">
-            <div class="fc-masonry" id="fc-masonry">
-              ${cards.map((card, i) => `
-                <div class="fc-card-wrap" data-noteid="${escapeHtml(card.noteId||'')}">
-                  <div class="flashcard-scene" onclick="this.querySelector('.flashcard-card').classList.toggle('flipped')">
-                    <div class="flashcard-card" style="height:150px;">
-                      <div class="flashcard-face flashcard-front">
-                        <div>
-                          ${card.noteTitle ? `<div style="font-size:0.6rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;">${escapeHtml(card.noteTitle)}</div>` : ''}
-                          <div class="flashcard-question">${escapeHtml(card.question)}</div>
-                        </div>
-                        <div class="flashcard-hint">👆 Click để lật</div>
-                      </div>
-                      <div class="flashcard-face flashcard-back">
-                        <div>
-                          <div class="flashcard-answer">${escapeHtml(card.answer)}</div>
-                        </div>
+            <div class="fc-groups-list">
+              ${groupList.map((group, gi) => `
+                <div class="fc-group" data-noteid="${escapeHtml(group.noteId)}">
+                  <div class="fc-group-header" onclick="toggleFCGroup(this)">
+                    <div class="fc-group-header-left">
+                      <div class="fc-group-icon">📝</div>
+                      <div class="fc-group-info">
+                        <div class="fc-group-title">${escapeHtml(group.noteTitle)}</div>
+                        <div class="fc-group-count">${group.cards.length} thẻ ôn tập</div>
                       </div>
                     </div>
+                    <div class="fc-group-chevron">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="6 9 12 15 18 9"/>
+                      </svg>
+                    </div>
                   </div>
-                </div>`).join('')}
+                  <div class="fc-group-body" style="display:none;">
+                    <div class="fc-masonry">
+                      ${group.cards.map(card => `
+                        <div class="fc-card-wrap" data-noteid="${escapeHtml(card.noteId||'')}">
+                          <div class="flashcard-scene" onclick="this.querySelector('.flashcard-card').classList.toggle('flipped')">
+                            <div class="flashcard-card" style="height:150px;">
+                              <div class="flashcard-face flashcard-front">
+                                <div>
+                                  <div class="flashcard-question">${escapeHtml(card.question)}</div>
+                                </div>
+                                <div class="flashcard-hint">👆 Click để lật</div>
+                              </div>
+                              <div class="flashcard-face flashcard-back">
+                                <div>
+                                  <div class="flashcard-answer">${escapeHtml(card.answer)}</div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>`).join('')}
+                    </div>
+                  </div>
+                </div>
+              `).join('')}
             </div>
           </div>
         `}
@@ -113,6 +149,25 @@ function renderFlashcardsPage() {
   injectFCStyles();
 }
 
+/* ---- Toggle expand/collapse a recording group ---- */
+function toggleFCGroup(headerEl) {
+  const group = headerEl.closest('.fc-group');
+  if (!group) return;
+  const body = group.querySelector('.fc-group-body');
+  const chevron = group.querySelector('.fc-group-chevron');
+  if (!body) return;
+
+  const isOpen = body.style.display !== 'none';
+  if (isOpen) {
+    body.style.display = 'none';
+    group.classList.remove('fc-group--open');
+  } else {
+    body.style.display = 'block';
+    group.classList.add('fc-group--open');
+  }
+}
+
+/* ---- Study mode ---- */
 function startStudyMode() {
   studyCards = [...Storage.getFlashcards()].sort(() => Math.random() - 0.5);
   currentFlashcardIdx = 0;
@@ -190,6 +245,7 @@ function filterFC(subject, btn) {
   });
 }
 
+/* ---- Styles ---- */
 function injectFCStyles() {
   if (document.getElementById('fc-styles')) return;
   const s = document.createElement('style');
@@ -208,6 +264,90 @@ function injectFCStyles() {
     .study-progress-text { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); }
     .study-card-area { display: flex; flex-direction: column; gap: 20px; }
     .study-actions { display: flex; justify-content: center; gap: 16px; }
+
+    /* ---- Recording groups ---- */
+    .fc-groups-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .fc-group {
+      border-radius: var(--radius-lg, 12px);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      overflow: hidden;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .fc-group:hover {
+      border-color: rgba(255,255,255,0.14);
+    }
+    .fc-group--open {
+      border-color: rgba(139,92,246,0.3);
+      box-shadow: 0 0 0 1px rgba(139,92,246,0.1);
+    }
+
+    .fc-group-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s ease;
+    }
+    .fc-group-header:hover {
+      background: rgba(255,255,255,0.03);
+    }
+    .fc-group-header-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+    .fc-group-icon {
+      font-size: 1.5rem;
+      flex-shrink: 0;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 10px;
+      background: rgba(139,92,246,0.12);
+    }
+    .fc-group-info {
+      min-width: 0;
+    }
+    .fc-group-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-primary, #f1f1f1);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 300px;
+    }
+    .fc-group-count {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--text-muted, #888);
+      margin-top: 2px;
+    }
+    .fc-group-chevron {
+      flex-shrink: 0;
+      color: var(--text-muted, #888);
+      transition: transform 0.25s ease;
+      display: flex;
+      align-items: center;
+    }
+    .fc-group--open .fc-group-chevron {
+      transform: rotate(180deg);
+    }
+
+    .fc-group-body {
+      padding: 4px 20px 20px 20px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
   `;
   document.head.appendChild(s);
 }

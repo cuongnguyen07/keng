@@ -33,22 +33,6 @@ function renderRecordPage() {
         </div>
       </div>
 
-      <!-- DRAG & DROP UPLOAD ZONE -->
-      <div class="upload-zone" id="upload-zone"
-        ondragover="handleDragOver(event)"
-        ondragleave="handleDragLeave(event)"
-        ondrop="handleFileDrop(event)"
-        onclick="document.getElementById('audio-file-input').click()"
-      >
-        <input type="file" id="audio-file-input" accept="audio/*,video/*" style="display:none" onchange="handleFileSelect(event)" />
-        <div class="upload-zone-icon" id="upload-zone-icon">📂</div>
-        <div class="upload-zone-title" id="upload-zone-title">Kéo thả file âm thanh vào đây</div>
-        <div class="upload-zone-hint">Hoặc bấm vào để chọn file &nbsp;•&nbsp; Hỗ trợ: MP3, WAV, M4A, OGG, WEBM, MP4</div>
-        <div class="upload-progress-wrap" id="upload-progress-wrap" style="display:none;">
-          <div class="upload-progress-bar"><div class="upload-progress-fill" id="upload-progress-fill"></div></div>
-          <div class="upload-progress-label" id="upload-progress-label">Đang xử lý...</div>
-        </div>
-      </div>
 
       <!-- MAIN WORKSPACE (2 columns) -->
       <div class="record-workspace">
@@ -261,260 +245,6 @@ function renderRecordPage() {
   initRecordPage();
 }
 
-/* ---- Drag & Drop File Upload Handlers ---- */
-function handleDragOver(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  const zone = document.getElementById('upload-zone');
-  if (zone) zone.classList.add('drag-over');
-}
-
-function handleDragLeave(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  const zone = document.getElementById('upload-zone');
-  if (zone) zone.classList.remove('drag-over');
-}
-
-function handleFileDrop(e) {
-  e.preventDefault();
-  e.stopPropagation();
-  const zone = document.getElementById('upload-zone');
-  if (zone) zone.classList.remove('drag-over');
-  const file = e.dataTransfer.files[0];
-  if (!file) return;
-  if (!file.type.startsWith('audio/') && !file.type.startsWith('video/')) {
-    showToast('⚠️ Vui lòng chọn file âm thanh (MP3, WAV, M4A, OGG, WEBM, MP4)', 'error');
-    return;
-  }
-  processUploadedAudio(file);
-}
-
-function handleFileSelect(e) {
-  const file = e.target.files[0];
-  if (file) processUploadedAudio(file);
-}
-
-async function processUploadedAudio(file) {
-  const zone = document.getElementById('upload-zone');
-  const icon = document.getElementById('upload-zone-icon');
-  const title = document.getElementById('upload-zone-title');
-  const progressWrap = document.getElementById('upload-progress-wrap');
-  const progressFill = document.getElementById('upload-progress-fill');
-  const progressLabel = document.getElementById('upload-progress-label');
-
-  // Show progress
-  if (icon) icon.textContent = '⏳';
-  if (title) title.textContent = `Đang xử lý: ${file.name}`;
-  if (progressWrap) progressWrap.style.display = 'block';
-  showToast(`📂 Đã tải file: ${file.name}`, 'info');
-
-  // Animate progress to 40%
-  let progress = 0;
-  const progressInterval = setInterval(() => {
-    progress = Math.min(progress + 5, 40);
-    if (progressFill) progressFill.style.width = progress + '%';
-  }, 100);
-
-  try {
-    let transcriptText = '';
-    const useProxy = window.location.protocol !== 'file:';
-
-    if (useProxy || AIEngine.isUsingGemini()) {
-      // Use Whisper via server proxy or direct API
-      if (progressLabel) progressLabel.textContent = 'Giao cho AI nhận diện giọng nói...';
-      clearInterval(progressInterval);
-      if (progressFill) progressFill.style.width = '60%';
-
-      const audioBlob = new Blob([await file.arrayBuffer()], { type: file.type });
-      transcriptText = await transcribeAudioFile(audioBlob, file.name);
-
-      if (progressFill) progressFill.style.width = '85%';
-    } else {
-      // Fallback: use Web Speech API on a local audio element
-      clearInterval(progressInterval);
-      if (progressFill) progressFill.style.width = '80%';
-      if (progressLabel) progressLabel.textContent = 'Không có AI, đối chiếu thủ công...';
-      transcriptText = '(File âm thanh đã tải lên. Cài API key Gemini để nhận diện nội dung tự động)';
-    }
-
-    if (progressFill) progressFill.style.width = '100%';
-    if (progressLabel) progressLabel.textContent = 'Hoàn tất!';
-
-    // Load the transcript into record state and save
-    await loadUploadedTranscript(transcriptText, file.name, file);
-
-    // Reset upload zone after a moment
-    setTimeout(() => {
-      if (icon) icon.textContent = '✅';
-      if (title) title.textContent = 'File đã xử lý thành công! Xem kết quả bên dưới';
-      if (progressWrap) progressWrap.style.display = 'none';
-    }, 1500);
-
-  } catch (err) {
-    clearInterval(progressInterval);
-    console.error('processUploadedAudio error:', err);
-    showToast('⚠️ Không thể xử lý file: ' + err.message, 'error');
-    if (icon) icon.textContent = '❌';
-    if (title) title.textContent = 'Xử lý thất bại. Thử lại!';
-    if (progressWrap) progressWrap.style.display = 'none';
-  }
-}
-
-async function transcribeAudioFile(audioBlob, fileName) {
-  const ext = fileName.split('.').pop().toLowerCase();
-  const mimeMap = { mp3: 'audio/mpeg', wav: 'audio/wav', m4a: 'audio/mp4', ogg: 'audio/ogg', webm: 'audio/webm', mp4: 'audio/mp4' };
-  const mimeType = mimeMap[ext] || audioBlob.type || 'audio/webm';
-  const namedBlob = new Blob([audioBlob], { type: mimeType });
-
-  const geminiKey = Storage.getSetting('gemini_key') || 'AQ.Ab8RN6L1s_3LMExd-E_tAFT2HSaUyXNhaUa3KjK1kdpjLEvOTw';
-  const openaiKey = Storage.getSetting('openai_key');
-
-  // Case A: Sử dụng API Key trực tiếp từ trình duyệt nếu có (Bypass giới hạn dung lượng & thời gian của Vercel cho file dài)
-  if (geminiKey) {
-    const base64Data = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result.split(',')[1]);
-      reader.onerror = (e) => reject(new Error('Không thể đọc file âm thanh: ' + e.target.error));
-      reader.readAsDataURL(namedBlob);
-    });
-
-    const model = 'gemini-2.5-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-    
-    // Chuẩn hóa MimeType cho Gemini
-    let gMimeType = mimeType;
-    if (gMimeType === 'audio/x-m4a' || gMimeType === 'audio/m4a') gMimeType = 'audio/mp4';
-
-    const promptText = recordState.language === 'en-US'
-      ? "Transcribe the audio/video file exactly as spoken. Output ONLY the transcript text, without any introduction, headers, comments, or markdown formatting."
-      : "Hãy chuyển đổi chính xác lời nói trong file âm thanh/video này thành văn bản tiếng Việt. CHỈ trả về đoạn văn bản hội thoại được dịch ra, không thêm lời chào, không thêm nhận xét, giải thích hay bất kỳ định dạng markdown nào.";
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { inlineData: { mimeType: gMimeType, data: base64Data } },
-            { text: promptText }
-          ]
-        }]
-      })
-    });
-
-    if (!res.ok) {
-      const errText = await res.text();
-      let errMsg = errText;
-      try {
-        const errJson = JSON.parse(errText);
-        if (errJson.error && errJson.error.message) errMsg = errJson.error.message;
-      } catch (e) {}
-      throw new Error(`Gemini Transcribe error: ${errMsg}`);
-    }
-
-    const data = await res.json();
-    const transcript = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    return transcript.trim();
-  }
-
-  if (openaiKey) {
-    const formData = new FormData();
-    formData.append('file', namedBlob, fileName);
-    formData.append('model', 'whisper-1');
-    formData.append('language', recordState.language === 'en-US' ? 'en' : 'vi');
-    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${openaiKey}` },
-      body: formData,
-    });
-    if (!res.ok) throw new Error(`Whisper API error: ${res.status}`);
-    const data = await res.json();
-    return data.text || '';
-  }
-
-  // Case B: Sử dụng Vercel proxy (dành cho người dùng không có Key lưu ở trình duyệt)
-  if (window.location.protocol !== 'file:') {
-    const formData = new FormData();
-    formData.append('file', namedBlob, fileName);
-    formData.append('language', recordState.language === 'en-US' ? 'en' : 'vi');
-    
-    let res;
-    try {
-      res = await fetch('/api/transcribe', { method: 'POST', body: formData });
-    } catch (fetchErr) {
-      throw new Error(`Kết nối thất bại: ${fetchErr.message}. Vui lòng kiểm tra mạng.`);
-    }
-
-    if (res.ok) {
-      const data = await res.json();
-      return data.text || '';
-    }
-
-    // Handle error response (either JSON or plain text)
-    let errorMsg = `Server error ${res.status}`;
-    try {
-      const errData = await res.json();
-      if (errData && errData.error) errorMsg = errData.error;
-    } catch (e) {
-      try {
-        const text = await res.text();
-        if (text && text.length < 150) {
-          errorMsg = text;
-        } else if (res.status === 504) {
-          errorMsg = 'Yêu cầu bị quá tải thời gian (Gateway Timeout). File của bạn có thể quá dài hoặc OpenAI phản hồi quá chậm.';
-        }
-      } catch (ex) {}
-    }
-    throw new Error(errorMsg);
-  }
-
-  throw new Error('Không có API key hoặc kết nối đến server để nhận diện. Vui lòng thiết lập GEMINI_API_KEY ở trình duyệt hoặc Vercel.');
-}
-
-async function loadUploadedTranscript(transcriptText, fileName, file) {
-  // Reset record state
-  recordState.transcript = transcriptText
-    ? transcriptText.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0).map(s => ({
-        text: s.trim(), speaker: 1,
-        timestamp: '00:00', isBookmark: false
-      }))
-    : [{ text: transcriptText || '(Không có nội dung)', speaker: 1, timestamp: '00:00', isBookmark: false }];
-
-  recordState.lastDuration = '00:00';
-  recordState.autoSaved = false;
-  recordState.currentNoteId = null;
-  window._recordStartTime = Date.now();
-
-  // Render transcript
-  const container = document.getElementById('transcript-segments');
-  const placeholder = document.getElementById('transcript-placeholder');
-  if (placeholder) placeholder.style.display = 'none';
-  if (container) {
-    container.innerHTML = '';
-    recordState.transcript.forEach((seg, idx) => {
-      const el = document.createElement('div');
-      el.className = 'transcript-segment';
-      el.dataset.idx = idx;
-      el.innerHTML = `<span>${escapeHtml(seg.text)}</span>`;
-      el.onclick = () => toggleSegmentBookmark(el, idx);
-      container.appendChild(el);
-    });
-    container.scrollTop = container.scrollHeight;
-  }
-
-  // Update status bar
-  const statusText = document.getElementById('status-text');
-  if (statusText) statusText.textContent = `✅ File đã tải: ${fileName}`;
-
-  // Auto-save and process
-  autoSaveNote();
-  showSaveBar();
-  if (recordState.transcript.length > 0) {
-    showToast('🤖 Đang phân tích AI...', 'info');
-    startAIProcessing();
-  }
-}
 
 /* ---- Record Page Styles ---- */
 function injectRecordStyles() {
@@ -522,39 +252,6 @@ function injectRecordStyles() {
   const style = document.createElement('style');
   style.id = 'record-page-styles';
   style.textContent = `
-    /* ---- Upload Drop Zone ---- */
-    .upload-zone {
-      margin: 0 32px 16px;
-      border: 2px dashed var(--border-soft);
-      border-radius: var(--radius-xl);
-      padding: 20px 24px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 6px;
-      cursor: pointer;
-      background: rgba(124,58,237,0.03);
-      transition: all 0.25s ease;
-      text-align: center;
-    }
-    @media (max-width: 768px) { .upload-zone { margin: 0 16px 12px; padding: 16px; } }
-    .upload-zone:hover, .upload-zone.drag-over {
-      border-color: var(--accent-violet);
-      background: rgba(124,58,237,0.08);
-      transform: translateY(-1px);
-      box-shadow: 0 4px 24px rgba(124,58,237,0.12);
-    }
-    .upload-zone.drag-over {
-      border-style: solid;
-      background: rgba(124,58,237,0.14);
-    }
-    .upload-zone-icon { font-size: 1.8rem; line-height: 1; }
-    .upload-zone-title { font-size: 0.88rem; font-weight: 600; color: var(--text-primary); }
-    .upload-zone-hint { font-size: 0.73rem; color: var(--text-muted); }
-    .upload-progress-wrap { width: 100%; max-width: 380px; margin-top: 8px; display: flex; flex-direction: column; gap: 6px; align-items: center; }
-    .upload-progress-bar { width: 100%; height: 6px; background: var(--bg-elevated); border-radius: var(--radius-full); overflow: hidden; }
-    .upload-progress-fill { height: 100%; width: 0%; background: var(--grad-primary); border-radius: var(--radius-full); transition: width 0.3s ease; }
-    .upload-progress-label { font-size: 0.72rem; color: var(--text-muted); }
 
     .record-page { min-height: 100vh; }
     .record-workspace {
@@ -812,6 +509,107 @@ function injectRecordStyles() {
 
     /* Flashcards in AI panel */
     .fc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 4px; }
+
+    /* Speaker Tag (Meeting Mode) */
+    .speaker-tag {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 2px 8px;
+      border-radius: var(--radius-sm);
+      margin-bottom: 3px;
+      cursor: pointer;
+      transition: all var(--duration-fast);
+      position: relative;
+    }
+    .speaker-tag::after {
+      content: '✎';
+      font-size: 0.6rem;
+      margin-left: 4px;
+      opacity: 0;
+      transition: opacity var(--duration-fast);
+    }
+    .speaker-tag:hover::after { opacity: 1; }
+    .speaker-tag:hover {
+      filter: brightness(1.3);
+      transform: scale(1.03);
+    }
+    .speaker-1 { background: rgba(124,58,237,0.18); color: var(--accent-violet); border: 1px solid rgba(124,58,237,0.25); }
+    .speaker-2 { background: rgba(6,182,212,0.18); color: var(--accent-cyan); border: 1px solid rgba(6,182,212,0.25); }
+
+    /* Speaker Rename Modal */
+    .speaker-rename-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.55);
+      backdrop-filter: blur(6px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      animation: fadeIn 0.2s ease;
+    }
+    .speaker-rename-modal {
+      width: 360px;
+      max-width: 92vw;
+      padding: 24px;
+      border-radius: var(--radius-xl);
+      animation: scaleIn 0.25s ease;
+    }
+    .speaker-rename-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .speaker-rename-icon {
+      width: 40px; height: 40px;
+      border-radius: var(--radius-md);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.15rem;
+    }
+    .speaker-rename-icon.speaker-1 { background: rgba(124,58,237,0.15); }
+    .speaker-rename-icon.speaker-2 { background: rgba(6,182,212,0.15); }
+    .speaker-rename-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text-primary);
+    }
+    .speaker-rename-body { margin-bottom: 18px; }
+    .speaker-rename-label {
+      display: block;
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+    .speaker-rename-input {
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-input);
+      color: var(--text-primary);
+      font-size: 0.9rem;
+      font-weight: 500;
+      outline: none;
+      transition: border-color var(--duration-fast);
+    }
+    .speaker-rename-input:focus {
+      border-color: var(--accent-violet);
+      box-shadow: 0 0 0 3px rgba(124,58,237,0.15);
+    }
+    .speaker-rename-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    @keyframes fadeOut {
+      from { opacity: 1; }
+      to { opacity: 0; }
+    }
   `;
   document.head.appendChild(style);
 }
@@ -832,6 +630,7 @@ let recordState = {
   autoSaved: false,
   micPermission: 'prompt',
   micBlocked: false,
+  speakerNames: { 1: 'Người nói 1', 2: 'Người nói 2' },
 };
 
 function initRecordPage() {
@@ -841,6 +640,7 @@ function initRecordPage() {
     transcript: [], bookmarks: [], interimText: '', bookmarkCount: 0,
     chatHistory: [], currentNoteId: null, aiResults: null, autoSaved: false,
     micPermission: 'prompt', micBlocked: false,
+    speakerNames: { 1: 'Người nói 1', 2: 'Người nói 2' },
   };
 
   // Query microphone permission status
@@ -870,7 +670,8 @@ function initRecordPage() {
   });
 
   SpeechEngine.on('speakerChange', (speaker) => {
-    showToast(`🎙️ Người nói ${speaker} đang phát biểu`, 'info');
+    const name = recordState.speakerNames[speaker] || `Người nói ${speaker}`;
+    showToast(`🎙️ ${name} đang phát biểu`, 'info');
     recordState.currentSpeaker = speaker;
   });
 
@@ -989,8 +790,9 @@ function addTranscriptSegment(text, speaker) {
     const el = document.createElement('div');
     el.className  = 'transcript-segment';
     el.dataset.idx = recordState.transcript.length - 1;
+    const speakerName = recordState.speakerNames[speaker] || `Người nói ${speaker}`;
     el.innerHTML  = `
-      ${recordState.meetingMode ? `<div class="speaker-tag speaker-${speaker}">Người nói ${speaker}</div>` : ''}
+      ${recordState.meetingMode ? `<div class="speaker-tag speaker-${speaker}" data-speaker="${speaker}" onclick="event.stopPropagation(); renameSpeaker(${speaker})" title="Click để đổi tên">${escapeHtml(speakerName)}</div>` : ''}
       <span>${escapeHtml(text)}</span>
     `;
     el.onclick = () => toggleSegmentBookmark(el, recordState.transcript.length - 1);
@@ -1121,6 +923,79 @@ function toggleMeetingMode() {
   recordState.meetingMode = !recordState.meetingMode;
   document.getElementById('meeting-toggle')?.classList.toggle('active', recordState.meetingMode);
   showToast(`👥 Meeting Mode: ${recordState.meetingMode ? 'BẬT' : 'TẮT'}`, 'info');
+}
+
+/* ---- Rename Speaker in Meeting Mode ---- */
+function renameSpeaker(speakerNum) {
+  const currentName = recordState.speakerNames[speakerNum] || `Người nói ${speakerNum}`;
+
+  // Create a modal overlay for renaming
+  const overlay = document.createElement('div');
+  overlay.className = 'speaker-rename-overlay';
+  overlay.id = 'speaker-rename-overlay';
+  overlay.innerHTML = `
+    <div class="speaker-rename-modal card-glass">
+      <div class="speaker-rename-header">
+        <div class="speaker-rename-icon speaker-${speakerNum}">🎙️</div>
+        <div class="speaker-rename-title">Đổi tên người nói</div>
+      </div>
+      <div class="speaker-rename-body">
+        <label class="speaker-rename-label">Tên hiện tại: <strong>${escapeHtml(currentName)}</strong></label>
+        <input type="text" class="speaker-rename-input" id="speaker-rename-input"
+          value="${escapeHtml(currentName)}" placeholder="Nhập tên mới..." maxlength="30"
+          autofocus />
+      </div>
+      <div class="speaker-rename-actions">
+        <button class="btn btn-ghost btn-sm" onclick="closeSpeakerRename()">Hủy</button>
+        <button class="btn btn-primary btn-sm" onclick="confirmSpeakerRename(${speakerNum})">✓ Xác nhận</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  // Focus and select input text
+  requestAnimationFrame(() => {
+    const input = document.getElementById('speaker-rename-input');
+    if (input) { input.focus(); input.select(); }
+  });
+
+  // Close on overlay background click
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) closeSpeakerRename();
+  });
+
+  // Enter key to confirm
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); confirmSpeakerRename(speakerNum); }
+    if (e.key === 'Escape') { e.preventDefault(); closeSpeakerRename(); }
+  });
+}
+
+function confirmSpeakerRename(speakerNum) {
+  const input = document.getElementById('speaker-rename-input');
+  const newName = input?.value.trim();
+  if (!newName) {
+    showToast('⚠️ Tên không được để trống', 'error');
+    return;
+  }
+
+  recordState.speakerNames[speakerNum] = newName;
+
+  // Update all existing speaker tags in the transcript for this speaker
+  document.querySelectorAll(`.speaker-tag[data-speaker="${speakerNum}"]`).forEach(tag => {
+    tag.textContent = newName;
+  });
+
+  closeSpeakerRename();
+  showToast(`✅ Đã đổi tên thành "${newName}"`, 'success');
+}
+
+function closeSpeakerRename() {
+  const overlay = document.getElementById('speaker-rename-overlay');
+  if (overlay) {
+    overlay.style.animation = 'fadeOut 0.2s ease forwards';
+    setTimeout(() => overlay.remove(), 200);
+  }
 }
 
 function showSaveBar() {

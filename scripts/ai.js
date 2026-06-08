@@ -15,7 +15,7 @@ const AIEngine = (() => {
     Storage.saveSetting('openai_key', key);
   }
 
-  const DEFAULT_GEMINI_KEY = 'AQ.Ab8RN6L1s_3LMExd-E_tAFT2HSaUyXNhaUa3KjK1kdpjLEvOTw';
+  const DEFAULT_GEMINI_KEY = 'AQ.Ab8RN6I2YhPDi9mJnOqh7RQbzGbX0Vfs89lwkHq_VM7aTcjlkg';
 
   function configureGemini(key) {
     geminiKey = key || DEFAULT_GEMINI_KEY;
@@ -28,6 +28,13 @@ const AIEngine = (() => {
     apiKey = Storage.getSetting('openai_key');
     useOpenAI = !!apiKey;
     geminiKey = Storage.getSetting('gemini_key') || DEFAULT_GEMINI_KEY;
+    
+    // Clear old invalid default key if it was cached
+    if (geminiKey === 'AQ.Ab8RN6L1s_3LMExd-E_tAFT2HSaUyXNhaUa3KjK1kdpjLEvOTw') {
+      geminiKey = DEFAULT_GEMINI_KEY;
+      Storage.saveSetting('gemini_key', geminiKey);
+    }
+    
     useGemini = !!geminiKey;
     useProxy = !geminiKey && window.location.protocol !== 'file:';
   }
@@ -106,7 +113,7 @@ const AIEngine = (() => {
   }
 
   // ---- FLASHCARDS ----
-  async function generateFlashcards(transcript, language = 'vi', count = 5) {
+  async function generateFlashcards(transcript, language = 'vi', count = 10) {
     if (useGemini || useProxy) {
       const langStr = language === 'vi' ? 'Tiếng Việt' : 'English';
       const systemInstruction = `Bạn tạo flashcard ôn tập từ nội dung bài giảng bằng ${langStr}. Tạo ${count} cặp Q&A. Định dạng:\nQ: [Câu hỏi]\nA: [Trả lời ngắn gọn]\n---`;
@@ -242,7 +249,7 @@ const AIEngine = (() => {
       const data = await res.json();
       return data.text;
     } else {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
       const body = {
         contents: [
           {
@@ -293,7 +300,7 @@ const AIEngine = (() => {
       const data = await res.json();
       return data.text;
     } else {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -345,7 +352,7 @@ const AIEngine = (() => {
     onProgress && onProgress('keyPoints', 'done');
 
     onProgress && onProgress('flashcards', 'loading');
-    try { results.flashcards = await generateFlashcards(transcript, language, 5); }
+    try { results.flashcards = await generateFlashcards(transcript, language, 10); }
     catch(e) { results.flashcards = []; }
     onProgress && onProgress('flashcards', 'done');
 
