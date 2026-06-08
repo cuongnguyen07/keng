@@ -21,7 +21,7 @@ const AIEngine = (() => {
     geminiKey = key || DEFAULT_GEMINI_KEY;
     useGemini = !!geminiKey;
     Storage.saveSetting('gemini_key', key);
-    useProxy = !geminiKey && window.location.protocol !== 'file:';
+    useProxy = window.location.protocol !== 'file:';
   }
 
   function loadConfig() {
@@ -36,7 +36,7 @@ const AIEngine = (() => {
     }
     
     useGemini = !!geminiKey;
-    useProxy = !geminiKey && window.location.protocol !== 'file:';
+    useProxy = window.location.protocol !== 'file:';
   }
 
   // ---- SUMMARIZE ----
