@@ -121,7 +121,7 @@ function renderRecordPage() {
             </div>
             <div class="ai-status-badge" id="ai-status-badge">
               <div class="ai-status-dot"></div>
-              <span>${typeof AIEngine !== 'undefined' && AIEngine.isUsingOpenAI() ? 'GPT-4o' : 'Mock AI'}</span>
+              <span>${typeof AIEngine !== 'undefined' && AIEngine.isUsingOpenAI() ? 'GPT-4o' : (AIEngine.isUsingGemini() ? 'Gemini AI' : 'Mock AI')}</span>
             </div>
           </div>
 
@@ -1048,10 +1048,12 @@ async function startAIProcessing() {
     }
   });
 
-  renderAIResult('summary',   recordState.aiResults.summary);
-  renderAIResult('keyPoints', recordState.aiResults.keyPoints);
-  renderAIResult('flashcards',recordState.aiResults.flashcards);
-  updateNoteWithAI();
+  if (recordState.aiResults) {
+    renderAIResult('summary',   recordState.aiResults.summary);
+    renderAIResult('keyPoints', recordState.aiResults.keyPoints);
+    renderAIResult('flashcards',recordState.aiResults.flashcards);
+    updateNoteWithAI();
+  }
 }
 
 function updateNoteWithAI() {

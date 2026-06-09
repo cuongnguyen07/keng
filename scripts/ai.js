@@ -65,10 +65,24 @@ const AIEngine = (() => {
     ];
   }
 
+  function splitIntoSentences(text) {
+    let sents = text.split(/[.!?]/).map(s => s.trim()).filter(s => s.length > 15);
+    if (sents.length <= 1) {
+      // Fallback for transcripts without punctuation: group words into pseudo-sentences
+      const words = text.split(/\s+/).filter(Boolean);
+      sents = [];
+      const chunkSize = 15;
+      for (let i = 0; i < words.length; i += chunkSize) {
+        sents.push(words.slice(i, i + chunkSize).join(' '));
+      }
+    }
+    return sents;
+  }
+
   function mockSummarize(transcript) {
-    const sentences = transcript.split(/[.!?]/).filter(s => s.trim().length > 20);
+    const sentences = splitIntoSentences(transcript);
     const picked = sentences.slice(0, 3).join('. ').trim();
-    return Promise.resolve(picked ? picked + '.' : 'Bài giảng này đề cập đến nhiều khái niệm quan trọng. Nội dung cần được xem lại để tóm tắt chính xác hơn.');
+    return Promise.resolve(picked ? picked + '.' : 'Bài giảng này đề cập đến nhiều khái niệm quan trọng.');
   }
 
   // ---- KEY POINTS ----
@@ -106,7 +120,7 @@ const AIEngine = (() => {
   }
 
   function mockKeyPoints(transcript) {
-    const sents = transcript.split(/[.!?]/).filter(s => s.trim().length > 30);
+    const sents = splitIntoSentences(transcript);
     const points = sents.slice(0, 4).map(s => s.trim().replace(/^\s*[-•]\s*/, ''));
     if (points.length < 2) points.push('Xem lại toàn bộ nội dung để nắm các ý chính.');
     return Promise.resolve(points);
@@ -153,7 +167,7 @@ const AIEngine = (() => {
   }
 
   function mockFlashcards(transcript, count) {
-    const sents = transcript.split(/[.!?]/).filter(s => s.trim().length > 25);
+    const sents = splitIntoSentences(transcript);
     const cards = [];
     for (let i = 0; i < Math.min(count, sents.length); i++) {
       const sent = sents[i].trim();
